@@ -1,0 +1,691 @@
+---
+title: "Week 1 - One-way and Two-way ANOVA"
+author: "4165336, 4180683"
+date: "11/17/2021"
+output: bookdown::html_document2
+---
+
+```{r setup, include=FALSE}
+# Knitr setup
+knitr::opts_chunk$set(echo = TRUE,
+                      message=FALSE, 
+                      warning=FALSE)
+
+#clear all
+rm(list=ls())
+
+# installs package if not already installed, otherwise, loads package.
+usePackage <- function(p) {
+    if (!is.element(p, installed.packages()[,1]))
+        install.packages(p, dep = TRUE)
+    require(p, character.only = TRUE)
+}
+
+# Packages
+usePackage('tidyverse')
+usePackage('patchwork')
+usePackage('car')
+usePackage('agricolae')
+usePackage('emmeans')
+usePackage('ggplot2')
+usePackage('viridis')
+usePackage('ggplot2')
+usePackage('ggpubr')
+usePackage('broom')
+usePackage('FSA')        
+usePackage('patchwork')
+  
+theme_basic <- theme(axis.text = element_text(size = 15),
+                 legend.key = element_rect(fill = "white", color=NA),
+                 legend.background = element_rect(fill = "white", color=NA, size = 1),
+
+                 panel.background = element_rect(fill = "white", color='black', size = 1.3),
+                 panel.grid = element_line(colour = 'black', size=1),
+                 
+                 panel.grid.major = element_blank(),
+                 panel.grid.minor = element_blank(),
+                 axis.title.x=element_text(size=17,face="bold"),
+                 axis.title.y=element_text(size=17,face="bold"),
+                 axis.text.x=element_text(size=15, colour = 'black'),
+                 axis.text.y=element_text(size=15, colour = 'black'),
+                 text = element_text(size=15, colour="black"),
+                 axis.ticks = element_line(colour = "black")
+                 )
+
+# Read data
+annuals <- read_csv(here::here("ANOVA_reshaped.csv"))
+```
+
+
+<br>
+
+# ANOVA
+
+Perform the following tests for a selected subset of the data. For each test choose appropriate variables and/or subset of the data:
+
+a) a one-way ANOVA with SNK and Tukey post hoc test
+b) ANOVA with two factors (if one of them is a random factor, note and perform appropriate test).
+
+<br />
+
+## One-way ANOVA
+
+**Specify what test you are carrying and why and on which variables (e.g. Here I test the effects of
+physical activity on blood pressure.**
+
+>Here we test the effects of species on survival probability in year 1 of the survey. We used a one-way ANOVA because it is appropriate to analyse the effect of a single multilevel factor (here the species) on a response variable (the survival probability). For this we first calculate the survival probability. 
+
+```{r}
+annuals = annuals %>%
+  mutate(surv = dens/germ) %>% # calculate survival
+  mutate(surv = ifelse(is.na(surv), 0 ,surv))# ignore NAs
+  
+annuals %>% 
+  head() %>% 
+  knitr::kable(caption = 'Head of the dataset.')
+
+annuals_y1 = annuals %>% 
+  filter(year == 1)
+```
+
+<br />
+
+**Visually inspect the data.**
+
+```{r, echo = F, fig.height = 4, fig.width = 6, fig.align = 'center', fig.cap='Survival probability between the different species of annuals.'}
+annuals_y1 %>% 
+  ggplot(aes(x = species, y = surv, fill = species))+
+  geom_boxplot()+
+  geom_jitter(alpha = 0.2, width =0.2)+
+  scale_fill_viridis_d(alpha = 0.7) +
+  theme_bw() +
+  theme_basic +
+  labs(x = "Species",
+       y = "Survival probability",
+       fill = "Species",)
+```
+
+<br />
+
+**Formulate one or more DIRECTIONAL hypotheses.**
+
+>The species *Ilfloga* is the smallest plant while the other species are relatively similar in size. We expect that the evapotranspiration of *Ifloga* is the smallest, making it hardy in arid climates.
+
+>$H_{1}:$ The species *Ifloga* has the highest survival probability. The survival probabilities of the other species are similar to each other.
+
+>To test our hypothesis, we used a one-way ANOVA, where we first calculate the mean survival rate per habitat and per species to facilitate independent datapoints:
+
+```{r}
+annuals_y1 = annuals_y1 %>% 
+  group_by(quadrat, species) %>% 
+  summarise(mean_surv_quad = mean(surv)) %>% 
+  ungroup()
+
+annuals_lm = lm(mean_surv_quad ~ species, data = annuals_y1)
+```
+
+<br />
+
+**Check appropriate model assumptions**
+
+1) Normal distribution & homoscedacity
+
+> Data is not normally distributed for the levels of the factor "species" (subfigure A). Additionally, the variances of the residuals have different variances (subfigure B). The distribtution of the residuals is also not normal (subfigure C).
+
+```{r, echo = F, fig.height = 9, fig.width = 9, fig.align = 'center', fig.cap='**(A)** Histogram of the survival probability by species. **(B)** Boxplot of the residuals of the survival probability per species. This approxiamtely illustrates the variance of the residuals across species. **(B)** Histogram of the residuals by species. This shows, if the residuals are normaly distributed.'}
+# Make hist to check normal dist
+hist1 = annuals_y1 %>%    
+  ggplot(aes(x = mean_surv_quad, fill = species)) +
+  geom_histogram(binwidth = 0.1, position = 'dodge', col="white") +
+  scale_fill_viridis(alpha = 1, 
+                     begin = 0.1, 
+                     end = 0.9,
+                     discrete = TRUE, 
+                     option = "D", 
+                     name = "Species")+
+  labs(x = 'Mean probability',
+       y = 'Count',
+       title = '')+
+  theme_bw()+theme_basic
+  
+# Check residuals and distr. of residuals
+assumptions = annuals_y1 %>% 
+  select(mean_surv_quad,species) %>%
+  mutate(fits=fitted(annuals_lm),
+                resids=resid(annuals_lm),
+                sresids=rstudent(annuals_lm))
+
+hist_resid = assumptions %>% 
+  ggplot(aes(x=resids, fill = species)) +
+  geom_histogram(binwidth=0.1, col = 'white',position = 'dodge', show.legend = FALSE)+
+  scale_fill_viridis(alpha = 1, 
+                     begin = 0.1, 
+                     end = 0.9,
+                     discrete = TRUE, 
+                     option = "D", 
+                     name = "Species")+
+  labs(x = 'Residuals',
+       y = 'Count',
+       title = '')+
+  theme_bw()+theme_basic
+
+boxplot_resid = assumptions %>% 
+  ggplot(aes(x=species,y=resids, fill = species)) +
+  geom_boxplot(show.legend = FALSE)+
+  scale_fill_viridis(alpha = 1, 
+                     begin = 0.1, 
+                     end = 0.9,
+                     discrete = TRUE, 
+                     option = "D", 
+                     name = "Species")+
+  labs(x = 'Species',
+       y = 'Residuals',
+       title = '')+
+  theme_bw()+theme_basic
+
+figure = ggarrange(
+  hist1,
+  ggarrange(
+    boxplot_resid, 
+    hist_resid, 
+    ncol = 2, 
+    labels = c("B", "C")), 
+  nrow = 2, 
+  labels = "A",
+  common.legend = TRUE, legend = "top") 
+
+figure
+```
+
+<br />
+
+2) Balanced design
+
+>The design is balanced. 
+
+```{r, echo = F, fig.height = 4, fig.width = 6, fig.align = 'center', fig.cap='Histogram of the occurences (counts) of each species. The plot shows that each species was sampled the same number of times.'}
+ggplot(annuals_y1, aes(x = species))+
+  geom_bar()+
+  labs(x = 'Species',
+       y = 'Count',
+       title = '')+
+  theme_bw()+theme_basic
+```
+
+<br>
+
+**Based on what you see, decide whether to carry out data transformation.**
+
+>
+- Data is not normally distributed (approx. poisson distributed)
+- Variances are not equal
+
+> To test if a transformation would improve the fulfilment of the assumptions, the data was trasformed:
+
+> $x_{n} = \log_{10}{\sqrt{(x_{n} + 1)}}$
+
+```{r}
+# Transform
+annuals_transf = annuals_y1 %>%
+  mutate(mean_surv_quad_transf = sqrt(log(mean_surv_quad+1)))
+
+# Redo anova with transformed data
+annuals_transf_lm = lm(mean_surv_quad_transf ~ species, data = annuals_transf)
+```
+
+```{r, echo = F, fig.height = 9, fig.width = 9, fig.align = 'center'}
+# # Make hist to check normal dist
+# hist1 = annuals_transf %>%    
+#   ggplot(aes(x = mean_surv_quad_transf, fill = species)) +
+#   geom_histogram(binwidth = 0.1, position = 'dodge', col="white") +
+#   scale_fill_viridis(alpha = 1, 
+#                      begin = 0.1, 
+#                      end = 0.9,
+#                      discrete = TRUE, 
+#                      option = "D", 
+#                      name = "Species")+
+#   labs(x = 'Transf. mean_surv_quadival probability',
+#        y = 'Count',
+#        title = '')+
+#   theme_bw()+theme_basic
+#   
+# # Check residuals and distr. of residuals
+# assumptions = annuals_transf %>% 
+#   select(mean_surv_quad_transf,species) %>%
+#   mutate(fits=fitted(annuals_transf_lm),
+#                 resids=resid(annuals_transf_lm),
+#                 sresids=rstudent(annuals_transf_lm))
+# 
+# hist_resid = assumptions %>% 
+#   ggplot(aes(x=resids, fill = species)) +
+#   geom_histogram(binwidth=0.1, col = 'white',position = 'dodge', show.legend = FALSE)+
+#   scale_fill_viridis(alpha = 1, 
+#                      begin = 0.1, 
+#                      end = 0.9,
+#                      discrete = TRUE, 
+#                      option = "D", 
+#                      name = "Species")+
+#   labs(x = 'Residuals',
+#        y = 'Count',
+#        title = '')+
+#   theme_bw()+theme_basic
+# 
+# boxplot_resid = assumptions %>% 
+#   ggplot(aes(x=species,y=resids, fill = species)) +
+#   geom_boxplot(show.legend = FALSE)+
+#   scale_fill_viridis(alpha = 1, 
+#                      begin = 0.1, 
+#                      end = 0.9,
+#                      discrete = TRUE, 
+#                      option = "D", 
+#                      name = "Species")+
+#   labs(x = 'Species',
+#        y = 'Residuals',
+#        title = '')+
+#   theme_bw()+theme_basic
+# 
+# figure = ggarrange(
+#   hist1,
+#   ggarrange(
+#     boxplot_resid, 
+#     hist_resid, 
+#     ncol = 2, 
+#     labels = c("B", "C")), 
+#   nrow = 2, 
+#   labels = "A",
+#   common.legend = TRUE, legend = "top") 
+# figure
+```
+```{r, echo = F, fig.height = 3, fig.width = 6, fig.align = 'center', fig.cap='**(A)** QQ-plot of the untransformed data. **(B)** QQ-plot of the transformed data.'}
+plot(annuals_lm, 2, title('(A)'))
+plot(annuals_transf_lm, 2,title('(B)'))
+```
+
+<br>
+
+>As seen on the qq-plots, the transformation did improve the distribution slightly. Thus we agreed to proceed with the transformed data.
+
+<br>
+
+**Carry out the model specifying the equation of the model you chose**
+
+```{r}
+annuals_transf_lm = lm(mean_surv_quad_transf ~ species, data = annuals_transf)
+```
+
+<br>
+
+**Examine the results of both Anova(model) and summary(model) and integrate them in you result description.**
+
+The one-way anova indicated a significant effect of plant species on the survival probability (F(3, 252) = 9.76, p < 0.001). The estimates for the species provided by the model were calculated from transformed data, therefore they are not useful to interpret the original data. The means of the survival rates for each species were calculated using the un-transformed data.
+
+```{r}
+anova1 = Anova(annuals_transf_lm, type = "II")
+
+anova1 %>% 
+  knitr::kable(caption = 'Anova summary table.')
+
+summary(annuals_transf_lm)
+
+annuals_y1 %>% 
+  group_by(species) %>% 
+  summarize(mean_survival = mean(mean_surv_quad)) %>% 
+  ungroup() %>% 
+    knitr::kable(caption = 'Means of the survival probability of the respective species.')
+```
+
+<br>
+
+**If necessary conduct post-hoc tests and report the appropriate results.**
+
+To quantify differences in mean survival between the species we performed a snk-post hoc test as well as the tukey-hsd. 
+
+```{r}
+post_hoc_snk = SNK.test(annuals_transf_lm, 'species', console = TRUE, main = 'posthoc_SNK')
+
+post_hoc_tukey = emmeans(annuals_transf_lm, pairwise ~ species)
+post_hoc_tukey 
+```
+
+<br>
+
+**Report your results indicating the direction of the effects.**
+
+>The one-way anova indicated a significant effect of plant species on the survival probability (F(3, 252) = 9.76, p < 0.001). The snk-posthoc test shows, that the survival probabilities of *Ifloga* and *Senecio* were significantly higher compared to *Rumex* and *Erodium*. We can thus reject the working hypothesis. The survival probability of the species *Senecio* was also elevated, possibly because it grows in the cover of larger shrubbery. This will be adressed in our second analysis.
+
+<br>
+
+**Graphically represent your results.**
+
+```{r, echo = F, fig.height = 4, fig.width = 6, fig.align = 'center', fig.cap='Survival probability per species. Species with the different letters are significantly different from each other.'}
+means.species <- annuals_y1 %>%
+  group_by(species)%>%
+  summarise(mean_surv = mean(mean_surv_quad), 
+            se.species = sd(mean_surv_quad)/sqrt(length(mean_surv_quad)))%>%
+  ungroup()%>%
+  mutate(se.species.min = mean_surv - se.species)%>%
+  mutate(se.species.max = mean_surv + se.species) %>% 
+  ungroup()
+  
+snk = c('a','b','a','b')
+means.species = cbind(means.species, snk)
+
+str(means.species)
+
+plot.species <- ggplot(data = means.species, aes(x = species, y = mean_surv))+
+  geom_bar(stat = "identity")+
+  geom_errorbar(
+    aes(ymin = se.species.min,
+        ymax = se.species.max),
+    position = position_dodge(width = 1), width = 0.1) +
+  
+  geom_jitter(data = annuals_y1, 
+              aes(x = species, y = mean_surv_quad),
+              width = 0.1, 
+              alpha = 0.2)+
+  labs(x = "Species", 
+       y = "Survival probability")+
+  
+  theme_bw()+theme_basic+
+  geom_text(aes(label = snk, vjust = -4))
+plot.species
+```
+
+<br>
+
+## Two-way ANOVA
+
+**Specify what test you are carrying and why and on which variables**
+
+>Here we test whether the species and the habitat of the annuals has an effect on the survival probability of the plants in year 1. The two-way anova is appropriate for analysing datasets with two multilevel factors as the predictor.
+As in the one way anova, we calculate the mean survival probability per quadrat so that the survival probability is not paired by quadrat.
+
+```{r}
+names(annuals)
+
+annuals = annuals %>%
+  mutate(surv = dens/germ) %>% # calculate survival
+  mutate(surv = ifelse(is.na(surv), 0 ,surv)) # ignore NAs
+head(annuals)
+
+annuals_y1 = annuals %>% 
+  filter(year == 1)
+
+annuals_y1 = annuals_y1 %>% 
+  group_by(quadrat, species, habitat) %>% 
+  summarise(mean_surv_quad = mean(surv)) %>% 
+  ungroup()
+```
+
+<br>
+
+**Visually inspect the data.**
+
+```{r, echo = F, fig.height = 4, fig.width = 6, fig.align = 'center', fig.cap='Survival probability for each species across the two different habitats.'}
+annuals_y1 %>% 
+  ggplot(aes(x = species, y = mean_surv_quad, fill = habitat))+
+  geom_boxplot(outlier.shape=NA)+
+  geom_point(position=position_jitterdodge(jitter.width =0.1), alpha = 0.4)+
+  scale_fill_viridis(alpha = 1, 
+                     begin = 0.4, 
+                     end = 0.9,
+                     discrete = TRUE, 
+                     option = "D", 
+                     name = "Species")+
+  labs(x = 'Species',
+       y = 'Survival probability',
+       title = '')+
+  theme_bw()+theme_basic+
+  theme(legend.position = "top")
+```
+
+<br>
+
+**Formulate one or more DIRECTIONAL hypotheses.**
+
+>$H_{1a}:$ The species *Ifloga*  and *Senecio* have the highest survival probability. The survival probabilities of the other species are similar to each other.
+
+>$H_{1b}:$ Shrub cover increases the survival probability of desert annuals.
+
+>$H_{1c}:$ Shrub cover increases the survival probability of *Ifloga* and *Senecio*. The survival probability of the other species is not affected by shrubbery.
+
+>The hypotheses will be tested using a two-way anova as follows
+
+```{r}
+annuals_y1_lm = lm(mean_surv_quad ~ species*habitat, data = annuals_y1)
+```
+
+<br>
+
+**Check appropriate model assumptions.**
+
+1) Similarity of variances and normal distribution
+
+>As seen in the previous boxplot, the variances are not similar. Additionally, the data is not normally distributed within the groups of both explanatory variables.
+
+```{r, echo = F, fig.height = 9, fig.width = 9, fig.align = 'center', fig.cap='**(A)** Histogram of the survival probability colored by species. **(B)** Residuals of the survival probability per species. **(C)** Histogram of the residuals of the survival probability per species.'}
+# Make hist to check normal dist
+hist1 = annuals_y1 %>%    
+  ggplot(aes(x = mean_surv_quad, fill = species)) +
+  geom_histogram(binwidth = 0.1, position = 'dodge', col="white") +
+  scale_fill_viridis(alpha = 1, 
+                     begin = 0.1, 
+                     end = 0.9,
+                     discrete = TRUE, 
+                     option = "D", 
+                     name = "Species")+
+  labs(x = 'Survival probability',
+       y = 'Count',
+       title = '')+
+  theme_bw()+theme_basic
+  
+# Check residuals and distr. of residuals
+assumptions = annuals_y1 %>% 
+  select(mean_surv_quad,species) %>%
+  mutate(fits=fitted(annuals_lm),
+                resids=resid(annuals_lm),
+                sresids=rstudent(annuals_lm))
+
+hist_resid = assumptions %>% 
+  ggplot(aes(x=resids, fill = species)) +
+  geom_histogram(binwidth=0.1, col = 'white',position = 'dodge', show.legend = FALSE)+
+  scale_fill_viridis(alpha = 1, 
+                     begin = 0.1, 
+                     end = 0.9,
+                     discrete = TRUE, 
+                     option = "D", 
+                     name = "Species")+
+  labs(x = 'Residuals',
+       y = 'Count',
+       title = '')+
+  theme_bw()+theme_basic
+
+boxplot_resid = assumptions %>% 
+  ggplot(aes(x=species,y=resids, fill = species)) +
+  geom_boxplot(show.legend = FALSE)+
+  scale_fill_viridis(alpha = 1, 
+                     begin = 0.1, 
+                     end = 0.9,
+                     discrete = TRUE, 
+                     option = "D", 
+                     name = "Species")+
+  labs(x = 'Species',
+       y = 'Residuals',
+       title = '')+
+  theme_bw()+theme_basic
+
+figure = ggarrange(
+  hist1,
+  ggarrange(
+    boxplot_resid, 
+    hist_resid, 
+    ncol = 2, 
+    labels = c("B", "C")), 
+  nrow = 2, 
+  labels = "A",
+  common.legend = TRUE, legend = "top") 
+
+figure
+```
+
+<br>
+
+**Balanced design.**
+
+>The design is balanced. 
+
+```{r,echo = F, fig.height = 4, fig.width = 6, fig.align = 'center', fig.cap='**(A)** Histogram of the occurences (count) of measurements in the dataset per species. **(B)** Histogram of the occureneces of measurements in the dataset per habiat. The histograms illustrate a balanced sampling scheme.'}
+plot1 = ggplot(annuals_y1, aes(x = species))+
+  geom_bar()+
+  labs(x = 'Species',
+       y = 'Count',
+       title = '(A)')+
+  theme_bw()+theme_basic+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+plot2 =ggplot(annuals_y1, aes(x = habitat))+
+  geom_bar()+
+  labs(x = 'Habitat',
+       y = 'Count',
+       title = '(B)')+
+  theme_bw()+theme_basic+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+ggarrange(plot1, plot2, ncol =2)
+```
+
+<br>
+
+**Based on what you see, decide whether to carry out data transformation.**
+
+>
+- Data is not normally distributed (approx. poisson distributed)
+- Variances are not equal
+
+>Data was transformed using the following formula: 
+
+> #### $x_{n} = \log_{10}{\sqrt{(x_{n} + 1)}}$
+
+>The transformation did improve the QQ-plot slightly.
+Since ANOVA´s are relatively robust, we continued with the analysis. 
+
+```{r}
+annuals_transf = annuals_y1 %>% 
+  mutate(mean_surv_quad_transf = sqrt(log(mean_surv_quad+1)))
+
+annuals_transf_lm = lm(mean_surv_quad_transf ~ species*habitat, data = annuals_transf)
+```
+
+```{r, echo = F, fig.height = 4, fig.width = 6, fig.align = 'center', fig.cap='QQ-plots of the residuals of the untransformed data (**A**) and the transformed data (**B**).'}
+plot(annuals_y1_lm, 2, title = '(A)')
+plot(annuals_transf_lm, 2, title = '(B)')
+```
+
+<br>
+
+**Carry out the model specifying the equation of the model you chose**
+
+```{r}
+annuals_transf_lm2 = lm(mean_surv_quad_transf ~ species*habitat, data = annuals_transf)
+
+anova1 = Anova(annuals_transf_lm2)
+
+anova1 %>% 
+  knitr::kable(caption = 'Anova')
+summary(annuals_transf_lm2)
+
+```
+
+<br>
+
+**Examine the results of both Anova(model) and summary(model) and integrate them in you result description.**
+
+>The two-way anova indicated a significant effect of plant species on the survival probability (F(3, 248) = 12.24, p < 0.001). The habitat type also had a significant effect on the survival probability (F(1, 248) = 5.78, p = 0.017). The survival rate between different habitat types changed differently for different species (F(3,248) = 20.75, p < 0.001). The estimates for the species provided by the model were calculated from transformed data, therefore they are not useful to interpret the original data. The means of the survival rates for each species were calculated using the untransformed data.
+
+```{r}
+annuals_y1 %>% 
+  group_by(species, habitat) %>% 
+  summarize(mean_survival = mean(mean_surv_quad)) %>% 
+  ungroup() %>% 
+    knitr::kable(caption = 'Means of the survival rate per species in the different habitats.')
+```
+
+<br>
+
+**If necessary conduct post-hoc tests and report the appropriate results.**
+
+>To quantify differences in mean survival between the species we performed a snk-post hoc test as well as the tukey-hsd. 
+
+```{r}
+post_hoc_snk = SNK.test(annuals_transf_lm2, c('species','habitat'), console = TRUE, main = 'posthoc_SNK')
+
+post_hoc_tukey = emmeans(annuals_transf_lm2, pairwise ~ species)
+post_hoc_tukey 
+```
+
+<br>
+
+**Report your results indicating the direction of the effects.**
+
+>The two-way anova indicated a significant effect of plant species on the survival probability (F(3, 248) = 12.24, p < 0.001). The habitat type also had a significant effect on the survival probability (F(1, 248) = 5.78, p = 0.017). The survival rate between different habitat types changed differently for different species (F(3,248) = 20.75, p < 0.001). The estimates for the species provided by the model were calculated from transformed data, therefore they are not useful to interpret the original data. The means of the survival rates for each species were calculated using the untransformed data. The SNK-post-hoc test showed that, 
+
+<br>
+
+**Graphically represent your results.**
+
+```{r,echo = F, fig.height = 4, fig.width = 6, fig.align = 'center', fig.cap='Reaction norm plot illustrating the survival probability for the four different species in two habitats. the error bars illustrate the standard error.'}
+
+means.species.2 <- annuals_y1 %>%
+  group_by(species, habitat)%>%
+  summarise(mean_surv = mean(mean_surv_quad), 
+            se.species = sd(mean_surv_quad)/sqrt(length(mean_surv_quad)))%>%
+  ungroup()%>%
+  mutate(se.species.min = mean_surv - se.species)%>%
+  mutate(se.species.max = mean_surv + se.species)
+
+snk.2 = c('d','bc','a','c', 'c', 'bc', 'b','bc')
+means.species.2 = cbind(means.species.2, snk)
+
+
+#str(means.species.2)
+
+plot.species <- ggplot(data = means.species.2, aes(x = habitat, y = mean_surv, color = species, group = species))+
+  geom_line(stat = 'identity', size = 0.5)+
+  geom_point()+
+  geom_errorbar(aes(ymin = se.species.min, ymax = se.species.max), width = 0.1) +
+  theme_bw()+
+  scale_color_viridis(alpha = 1, 
+                     begin = 0, 
+                     end = 0.9,
+                     discrete = TRUE, 
+                     option = "D", 
+                     name = "Species")+
+  labs(x = 'Species',
+       y = 'Survival probability',
+       title = '')+
+  theme_basic+
+  theme(legend.position = "top")
+plot.species
+```
+
+```{r, echo = F, fig.height = 4, fig.width = 6, fig.align = 'center', fig.cap='Barplot representing the survival rates per species in the respective habitats. Species bars with different letters are significantly different from each other.'}
+plot.species.bar <- ggplot(data = means.species.2, aes(x = habitat, y = mean_surv, colour = species, fill = species))+
+  geom_bar(stat = "identity", position = 'dodge')+
+  geom_errorbar(
+    aes(ymin = se.species.min,
+        ymax = se.species.max),
+    position = position_dodge(width = 1), width = 0.1) +
+  
+  geom_jitter(data = annuals_y1, 
+              aes(x = habitat, y = mean_surv_quad),
+              width = 0.1, 
+              alpha = 0.2)+
+  labs(x = "Habitat", 
+       y = "Survival probability")+
+  
+  theme_bw()+
+  theme_basic+
+  geom_text(aes(label = snk.2, vjust = -4), position = position_dodge(width = 1))
+plot.species.bar
+
+```

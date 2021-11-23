@@ -1,0 +1,514 @@
+---
+title: "Advanced Biometry - Exercises: Week 1 - Paired and independent t-test"
+author: 'Group: 4165336, 4180683'
+date: "11/16/2021"
+output: bookdown::html_document2
+---
+
+<br />
+
+```{r setup, include=FALSE}
+# Knitr setup
+knitr::opts_chunk$set(echo = TRUE,
+                      message=FALSE, 
+                      warning=FALSE)
+#clear all
+rm(list=ls())
+
+# Packages
+usePackage <- function(p) {
+    if (!is.element(p, installed.packages()[,1]))
+        install.packages(p, dep = TRUE)
+    require(p, character.only = TRUE)
+}
+
+
+usePackage("tidyverse")
+usePackage("patchwork")
+usePackage("car")
+usePackage("agricolae")
+usePackage("emmeans")
+usePackage("viridis")
+usePackage("ggplot2")
+usePackage("ggpubr")
+  
+theme_basic <- theme(axis.text = element_text(size = 15),
+                 legend.key = element_rect(fill = "white", color=NA),
+                 legend.background = element_rect(fill = "white", color=NA, size = 1),
+
+                 panel.background = element_rect(fill = "white", color='black', size = 1.3),
+                 panel.grid = element_line(colour = 'black', size=1),
+                 
+                 panel.grid.major = element_blank(),
+                 panel.grid.minor = element_blank(),
+                 axis.title.x=element_text(size=17,face="bold"),
+                 axis.title.y=element_text(size=17,face="bold"),
+                 axis.text.x=element_text(size=15, colour = 'black'),
+                 axis.text.y=element_text(size=15, colour = 'black'),
+                 text = element_text(size=15, colour="black"),
+                 axis.ticks = element_line(colour = "black")
+                 )
+
+# Read data
+annuals <- read_csv(here::here("ANOVA_reshaped.csv"))
+```
+
+# Paired and independent t-test
+## Answer the following questions
+
+**(a) Which are the explanatory (or independent) variables in this experiment?**
+
+<br />
+
+>The variables that are changed or controlled in this experiment are:
+>
+-   habitat
+-   species
+
+<br />
+
+**(b) Which of the variables are paired and which are independent?**
+
+>The variables
+>
+-   dens
+-   germ
+
+>represent density measurements per block that are conducted in year 1 and repeated in year 2. Thus they are paired.
+
+<br />
+
+**(c) Are there random factors in this design?**
+
+> For a random factor, selection is random and can not be repeated and only a random part of the possible levels of $X_{i}$ is selected. Example: If multiple density measurements are conducted in a block, multiple data points share the same block (i.e. not all possible levels of $X_{i}$ are selected) and if the experiment would be redone, randomization of the blocks would make the repetition of the blocking impossible.
+>
+-   block
+-   quadrat
+
+<br />
+
+**(d) Do you need to modify the table (i.e. "data frame" in R) or can you leave it as it is?**
+
+> R performs a paired t-test correctly, if the pairing variable (i.e. year) is formatted correctly.
+
+```{r}
+str(annuals)
+```
+
+> For this, year should be transformed from a numerical vector to a factor and the daata frame must be sorted using "year".
+
+<br />
+
+**(e) Which, if any, variables need to be transformed and what kind of transformation do you need to apply?**
+
+> We transformed the year from a numerical vector to a factor and sorted the data frame.
+
+```{r}
+# Factor transformations
+annuals$block = as.factor(annuals$block)
+annuals$quadrat = as.factor(annuals$quadrat)
+annuals$year = as.factor(annuals$year)
+
+# Order year for paired ttest
+annuals <- annuals[order(annuals$year), ]
+```
+
+<br />
+
+## Survival probability
+
+**Calculate (for all species and for both years) the survival probability, i.e. the fraction of seedlings surviving to adulthood.**
+
+```{r}
+# Calculate survival
+annuals = annuals %>%
+  mutate(surv = dens/germ) %>%                      # Survival probability
+  mutate(surv = ifelse(is.na(surv), 0 ,surv))       # Remove NA's
+head(annuals) %>% 
+  knitr::kable(caption = 'Head of the dataset.')
+
+# Calculate mean survival per quadrat so that data is not paired by quadrat
+annuals_means = annuals %>%
+  group_by(quadrat, species, year) %>% 
+  summarise(mean_surv_quad = mean(surv),
+            mean_germ_quad = mean(germ),
+            mean_dens_quad = mean(dens),
+            habitat, block, species, year) %>% 
+  ungroup()
+```
+
+<br />
+
+## T-tests
+
+Perform the following tests for a selected subset of the data. For each test choose appropriate variables and/or subset of the data:
+
+(A) A paired t-test
+(B) An independent samples t-test
+
+For Questions 3 a-b, follow this procedure in reporting your work:
+
+<br />
+
+### Paired t-test
+
+**Specify what test you are carrying and why and on which variables.**
+
+>Here we test the **survival probability** of annual plants measured in **2 years** assuming less precipitation in the second year. We used a **paired t-test** because it is appropriate to analyse **repeated measurements** of plant density in specific plots over two years. Since the density measurements are repeated 4 times for each quadrat, we calculated the mean density per quadrat so that the data is only paired by year and not additinally by quadrat.
+
+
+<br />
+
+**Visually inspect the data.**
+
+```{r, echo = F, fig.height = 4, fig.width = 6, fig.align = 'center', fig.cap= 'Surival probability across year one and two, colored by the respective species.'}
+annuals_means%>%
+  ggplot(aes(x = year, y = mean_surv_quad, fill = species))+
+  geom_boxplot() +
+  scale_fill_viridis_d(alpha = 0.7) +
+  # geom_jitter(width = 0.2, alpha = 0.4)+
+  theme_bw() +
+  theme_basic +
+  labs(x = "Year", y = "Survival probability", fill = "Species")
+```
+
+<br />
+
+**Formulate one or more DIRECTIONAL hypotheses.**
+
+>Based on the assumption that precipitation decreased in the second year, we formulated the following hypothesis:
+
+>$H_{1}$: Plant survival is lower in year two.
+
+<br />
+
+**Check appropriate model assumptions.**
+
+1) Check for normal distribution by histogram & qq-plot
+
+<br />
+```{r, echo = F, fig.height = 6, fig.width = 9, fig.align = 'center', fig.cap='Histogram of the overall survival probability'}
+hist_o = annuals_means %>%    
+  ggplot(aes(x = mean_surv_quad)) +
+  geom_histogram(bins = 20) +
+  labs(x = 'Survival probability',
+       y = 'Count',
+       title = 'Histogram overall data')+
+  theme_bw()+theme_basic
+hist_o
+```
+
+```{r, echo = F, fig.height = 6, fig.width = 9, fig.align = 'center', fig.cap='Histogram and QQ-plot of the survival proabability across year 1 and year 2 respectively.'}
+
+# Make hist and qqplot for year 1
+hist1 = annuals_means %>%    
+  filter(year == "1") %>% 
+  ggplot(aes(x = mean_surv_quad)) +
+  geom_histogram(bins = 20) +
+  labs(x = 'Count',
+       y = 'Survival probability',
+       title = 'Histogram year 1')+
+  theme_bw()+theme_basic
+
+qq1 = annuals_means %>% 
+  filter(year == "1") %>% 
+  ggplot(aes(sample = mean_surv_quad)) +
+  stat_qq() +
+  stat_qq_line()+
+  labs(x = 'Normal distribution quantiles',
+       y = 'Sample quantiles',
+       title = 'QQ-plot year 1')+
+  theme_bw()+theme_basic
+
+# Make hist and qqplot for year 2
+hist2=annuals_means %>%
+  filter(year == "2") %>% 
+  ggplot(aes(x = mean_surv_quad)) +
+  geom_histogram(bins = 20) +
+  labs(x = 'Count',
+       y = 'Survival probability',
+       title = 'Histogram year 2')+
+  theme_bw()+theme_basic
+
+qq2 = annuals_means %>% 
+  filter(year == "1") %>% 
+  ggplot(aes(sample = mean_surv_quad)) +
+  stat_qq() +
+  stat_qq_line()+
+  labs(x = 'Normal distribution quantiles',
+       y = 'Sample quantiles',
+       title = 'QQ-plot year 2')+
+  theme_bw()+theme_basic
+
+figure = ggarrange(hist1, qq1, hist2, qq2, ncol = 2, nrow = 2)
+figure
+```
+
+> The normality assumption for the overall data and within groups is not met.
+
+<br />
+
+2) Homoscedasticity assumptions:
+
+Levene’s Test: To formally assess homogeneity of variances, you need to carry out Levene’s test. You will first need to load the package car, if you haven’t already.
+
+```{r}
+leveneTest(mean_surv_quad ~ year, center = mean, data = annuals_means)
+```
+
+> Levene's test indicates a statistical significance ($p < 0.001$). We can thus reject $H_{0}$, that variances are equal. The homoscedacity assumption is not met.
+
+<br />
+
+**Based on what you see, decide whether to carry out data transformations.**
+
+> We tried log-transformation and squareroot-transformation, which did not improve our data. For this reason, the t-tests are conducted without transforming the data.
+
+<br />
+
+**Specify the response (dependent) and explanatory (independent) variables for each test.**
+
+>
+- Response: **surv**
+- Independent: **year**
+
+<br />
+
+**The description of the statistical tests results will report the results of the test.**
+
+```{r}
+t_test1 <- t.test(mean_surv_quad ~ year,annuals_means, paired = T)
+t_test1
+```
+
+<br />
+
+**Report your results indicating the direction of the effects and discuss the biological meaning of your results. Indicate also if the results are consistent with your initial hypothesis or not (\< 4 sentences).**
+
+> Results: We found a significant increase of the survival probability in year 2 compared to year 1 (paired t-test: $t(255) = -10.22, p < 0.001$). Since the survival probability changed in the opposite direction as anticipated, we reject our hypothesis $H_{1}$, that the survival probability decreases in year 2. If the precipitation decreased in year two relative to year one, the focal plants may have benefited from a relative decrease, if precipitation was unusually high in year one. Additionally, precipitation data for the region should be revised to make informed about the effects at play.
+
+<br />
+
+**Graphically represent your results using bar plots.**
+
+```{r, echo = F, fig.height = 4, fig.width = 6, fig.align = 'center', fig.cap='Survival probability plotted per year. The bars represent the standard error.'}
+# Create new dataset for barplot
+means_years = annuals_means %>%
+  group_by(year)%>%
+  summarise(mean_years = mean(mean_surv_quad), se_years = sd(mean_surv_quad)/sqrt(length(mean_surv_quad)))%>%
+  ungroup()%>%
+  mutate(se_years_min = mean_years - se_years)%>%
+  mutate(se_years_max = mean_years + se_years)
+
+str(means_years)
+
+means_years %>% 
+  ggplot(aes(x = year, y = mean_years))+
+  geom_bar(stat = "identity")+
+  geom_errorbar(aes(ymin = se_years_min, ymax = se_years_max), 
+                position = position_dodge(width = 1), 
+                width = 0.1) +
+  geom_jitter(data = annuals_means, 
+              aes(x = year, y = mean_surv_quad), 
+              width = 0.1,
+              alpha = 0.2)+
+  labs(x = "Year", 
+       y = "Survival probability", 
+       title = "Survival of annual plants over two years")+
+  theme_bw()+theme_basic
+```
+
+### Independent samples t-test
+
+**Specify what test you are carrying and why and on which variables.**
+
+> Here we compare the **survival probability** of plants between two **habitat types** during one year. Since the density measurements are repeated 4 times for each quadrat, we calculated the mean density per quadrat to meet the independence-criterion of an independent t-test.
+
+<br />
+
+**Visually inspect the data.**
+
+```{r}
+# Calculate mean for repeated measures of quadrats
+
+annuals_y1 = annuals %>%
+  filter(year == 1) %>% 
+  group_by(quadrat, species) %>% 
+  summarise(mean_surv_quad = mean(surv),
+            mean_germ_quad = mean(germ),
+            mean_dens_quad = mean(dens),
+            habitat, block, species, year) %>% 
+  ungroup() 
+
+annuals_y1%>% 
+  head() %>% 
+  knitr::kable(caption = 'Head of the dataset for the independent samples t-test')
+```
+
+
+```{r, echo = F, fig.height = 4, fig.width = 6, fig.align = 'center', fig.cap='Survival probability of annuals plotted against their habitat. Boxplots are colored by species.'}
+# Show resulting dataset
+head(annuals_y1)
+
+# Plot survivial 
+annuals_y1 %>% 
+  ggplot(aes(x = habitat, y = mean_surv_quad, fill = species))+
+  geom_boxplot() +
+  scale_fill_viridis_d(alpha = 0.7) +
+  # geom_jitter(width = 0.2, alpha = 0.4)+
+  theme_bw() +
+  theme_basic +
+  labs(x = "Species",
+       y = "Survival probability",
+       fill = "Species",)
+```
+
+>The box plots indicate no clear trend of survival probability in the two habitat types. The disproportionally high median of the survival probability of *Ilfloga* might result in an overall higher survival probability in open habitats.
+
+<br />
+
+**Formulate one or more DIRECTIONAL hypotheses.**
+
+> Based on the assumption that shrubbery might protect annuals from abiotic stressors and thus facilitae their survival, we formulated the following hypothesis:
+
+> $H_{1}$: Plant survival is higher in the shrubbery habitat than in the open habitat.
+
+<br />
+
+**Check appropriate model assumptions.**
+
+1) Check for normal distribution by histogram & qq-plot
+
+<br />
+```{r, echo = F, fig.height = 6, fig.width = 9, fig.align = 'center', fig.cap='Histogram of the overall survival probability'}
+
+hist_o = annuals_y1 %>%    
+  ggplot(aes(x = mean_surv_quad)) +
+  geom_histogram(bins = 20) +
+  labs(x = 'Survival probability',
+       y = 'Count',
+       title = 'Histogram overall data')+
+  theme_bw()+theme_basic
+hist_o
+
+```
+
+
+```{r, echo = F, fig.height = 6, fig.width = 9, fig.align = 'center', fig.cap='Histogram and QQ-plot of the survival probabilities for the two habitat types respectively.'}
+
+# Make hist and qqplot for year 1
+hist1 = annuals_y1 %>%    
+  filter(habitat == "shrub") %>% 
+  ggplot(aes(x = mean_surv_quad)) +
+  geom_histogram(bins = 20) +
+  labs(x = 'Survival probability',
+       y = 'Count',
+       title = 'Histogram habitat shrub')+
+  theme_bw()+theme_basic
+
+qq1 = annuals_y1 %>% 
+  filter(habitat == "shrub") %>% 
+  ggplot(aes(sample = mean_surv_quad)) +
+  stat_qq() +
+  stat_qq_line()+
+  labs(x = 'Normal distribution quantiles',
+       y = 'Sample quantiles',
+       title = 'QQ-plot habitat shrub')+
+  theme_bw()+theme_basic
+
+# Make hist and qqplot for year 2
+hist2=annuals_y1 %>%
+  filter(habitat == 'open') %>% 
+  ggplot(aes(x = mean_surv_quad)) +
+  geom_histogram(bins = 20) +
+  labs(x = 'Survival probability',
+       y = 'Count',
+       title = 'Histogram habitat open')+
+  theme_bw()+theme_basic
+
+qq2 = annuals_y1 %>% 
+  filter(habitat == 'open') %>% 
+  ggplot(aes(sample = mean_surv_quad)) +
+  stat_qq() +
+  stat_qq_line()+
+  labs(x = 'Normal distribution quantiles',
+       y = 'Sample quantiles',
+       title = 'QQ-plot habitat open')+
+  theme_bw()+theme_basic
+
+figure = ggarrange(hist1, qq1, hist2, qq2, ncol = 2, nrow = 2)
+figure
+```
+
+> The normality assumption for the overall data and within groups is not met.
+
+<br />
+
+2) Homoscedasticity assumptions: Levene’s Test: To formally assess homogeneity of variances, you need to carry out Levene’s test. You will first need to load the package car, if you haven’t already.
+
+```{r}
+leveneTest(mean_surv_quad ~ habitat, center = mean, data = annuals_y1)
+```
+
+> Levene's test indicates a statistical significance ($p < 0.001$). We can thus reject $H_{0}$, that variances are equal. The homoscedacity assumption is not met.
+
+<br />
+
+**Based on what you see, decide whether to carry out data transformations.**
+
+> We tried log-transformation and square root-transformation, which did not improve the QQ-plots. For this reason, the t-tests are conducted without transforming the data.
+
+<br />
+
+**Specify the response (dependent) and explanatory (independent) variables for each test.**
+
+>
+- Response: **mean_surv_quad**
+- Independent: **habitat**
+
+<br />
+
+**The description of the statistical tests results will report the results of the test.**
+
+```{r}
+t_test1 = t.test(mean_surv_quad ~ habitat, var.equal = FALSE, data = annuals_y1)
+t_test1
+```
+
+<br />
+
+**Report your results indicating the direction of the effects and discuss the biological meaning of your results. Indicate also if the results are consistent with your initial hypothesis or not (\< 4 sentences).**
+
+>Results: We found a significant increase of the survival probability in an open habitat compared to a shrub habitat (paired t-test: $t(229.46) = 3.37, p < 0.001$). Since the survival probability changed in the opposite direction as anticipated, we reject our hypothesis $H_{1}$, that the survival probability increases when annuals grow under the cover of shrubs. Competition for ressources might outweight a proposed facilitative effect of the shrubs on the annuals, thus decreasing annual plant surivival probability in shrub habitats.
+
+<br />
+
+**Graphically represent your results using bar plots.**
+
+```{r, echo = F, fig.height = 4, fig.width = 6, fig.align = 'center', fig.cap='Survival of annual plants in the respective habitat types. The error bars represent the standard error.'}
+# Create new dataset for barplot
+means_habitat = annuals_y1 %>%
+  group_by(habitat)%>%
+  summarise(mean_surv = mean(mean_surv_quad), 
+            se_surv = sd(mean_surv_quad)/sqrt(length(mean_surv_quad)))%>%
+  ungroup()%>%
+  mutate(se_surv_min = mean_surv - se_surv)%>%
+  mutate(se_surv_max = mean_surv + se_surv)
+
+str(means_habitat)
+
+means_habitat %>% 
+  ggplot(aes(x = habitat, y = mean_surv))+
+  geom_bar(stat = "identity")+
+  geom_errorbar(aes(ymin = se_surv_min, ymax = se_surv_max), 
+                position = position_dodge(width = 1), 
+                width = 0.1) +
+  geom_jitter(data = annuals_y1,
+              aes(x = habitat, y = mean_surv_quad),
+              width = 0.1,
+              alpha = 0.2)+
+  labs(x = "Habitat", 
+       y = "Survival probability", 
+       title = "")+
+  theme_bw()+ theme_basic
+```

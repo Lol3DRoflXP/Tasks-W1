@@ -1,0 +1,415 @@
+---
+title: "Ex W1 Correlation Regression"
+author: "4165336, 4180683"
+date: "11/18/2021"
+output:
+  html_document:
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+# Knitr setup
+knitr::opts_chunk$set(echo = TRUE,
+                      message=FALSE, 
+                      warning=FALSE)
+
+#clear all
+rm(list=ls())
+```
+
+```{r, echo=F}
+
+# installs package if not already installed, otherwise, loads package.
+usePackage <- function(p) {
+    if (!is.element(p, installed.packages()[,1]))
+        install.packages(p, dep = TRUE)
+    require(p, character.only = TRUE)
+}
+
+# Packages
+usePackage('tidyverse')
+usePackage('patchwork')
+usePackage('car')
+usePackage('agricolae')
+usePackage('emmeans')
+usePackage('ggplot2')
+usePackage('ggpubr')
+usePackage('broom')
+usePackage('FSA')        
+usePackage('viridis')
+usePackage('corrr')
+usePackage('GGally')
+usePackage('ggExtra')
+  
+theme_basic <- theme(axis.text = element_text(size = 15),
+                 legend.key = element_rect(fill = "white", color=NA),
+                 legend.background = element_rect(fill = "white", color=NA, size = 1),
+
+                 panel.background = element_rect(fill = "white", color='black', size = 1.3),
+                 panel.grid = element_line(colour = 'black', size=1),
+                 
+                 panel.grid.major = element_blank(),
+                 panel.grid.minor = element_blank(),
+                 axis.title.x=element_text(size=17,face="bold"),
+                 axis.title.y=element_text(size=17,face="bold"),
+                 axis.text.x=element_text(size=15, colour = 'black'),
+                 axis.text.y=element_text(size=15, colour = 'black'),
+                 text = element_text(size=15, colour="black"),
+                 axis.ticks = element_line(colour = "black")
+                 )
+
+# Function for the panel histogram
+panel.hist <- function(x, ...)
+{
+  usr <- par("usr"); on.exit(par(usr))
+  par(usr = c(usr[1:2], 0, 1.5) )
+  h <- hist(x, plot = FALSE)
+  breaks <- h$breaks; nB <- length(breaks)
+  y <- h$counts; y <- y/max(y)
+  rect(breaks[-nB], 0, breaks[-1], y, col = "cyan", ...)
+}
+
+# Read data
+data = read_csv(here::here('correlation_regression.csv'))
+
+```
+
+
+<br>
+
+## Week 1- Correlation and regression
+
+**Explore the data using the functions str() and summary() and decide if variables are coded correctly or need any transformation.**
+
+```{r, fig.width=unit(30,"cm"), fig.height=unit(30,"cm")}
+str(data) 
+summary(data)
+  
+data$site = as.factor(data$site)
+data$replicate = as.factor(data$replicate)
+str(data) 
+```
+
+<br>
+
+
+**Then perform the following analyses.**
+
+### Correlations: 
+
+**Perform a correlation analysis with all possible pairs in the dataset. From this set of options, choose three pairs that make (biologically) sense to be analysed as correlations (as opposed to regression), phrase a hypothesis and report the results.**
+
+<br>
+
+**Formulate one or more directional hypotheses**
+ 
+> $H_{1a}$: The final height of the focal tree decreases with the mean final height of the neighboring trees.
+ 
+> $H_{1b}$: The final height of the focal tree decreases with the mean initial height of the neighboring trees.
+ 
+> $H_{1c}$: The growth rate of the focal tree decreases with the growth rate of neighbouring trees.
+ 
+```{r, fig.cap= 'Pairwise correlations of all variables, colour gradient signifies direction and strength of correlation between blue for negative and red for positive'}
+# Create new dataset
+juniper_corr = data[, 3:16]
+
+pairs2 = ggpairs(juniper_corr, aes(alpha = 0.4))
+ggsave(here::here('pairs1.pdf'), pairs2,
+       width = 40, height = 40, units = 'cm',
+       dpi = 300
+       )
+pairs2
+
+ggcorr(juniper_corr, method = c('pairwise', 'pearson'),
+       label = TRUE)
+
+data2 = data %>% 
+  mutate(mean_neighb_i = (neighb1_height_i + neighb2_height_i + neighb3_height_i )/3,
+         mean_neighb_f = (neighb1_height_f + neighb2_height_f + neighb3_height_f )/3,
+         change_f = focal_height_f - focal_height_i,
+         change_neighb = mean_neighb_f-mean_neighb_i
+  )
+```
+
+<br>
+
+**Check appropriate model assumptions and if necessary transform data**
+
+```{r, echo = F, fig.height = 12, fig.width = 6, fig.align = 'center', fig.cap= ' A: Plot of mean initial neighbour height against final focal plant height, B: Plot of mean final neighbour height against final focal plant height, C: Plot of focal plant growth against mean neighbour plant growths, all plots with histograms of x and y variable along opposite axis'}
+# Setup plot 1
+plot_temp1 = ggplot(data2, aes(x = mean_neighb_i, y = focal_height_f)) + 
+  geom_point()+
+  theme_bw() +
+  theme_basic+
+  labs(x = 'Mean initial neighbour height',
+       y = 'Final focal height', title = 'A')
+# Add histograms
+plot_temp1 = ggExtra::ggMarginal(plot_temp1, type = "histogram")
+
+# Setup plot 2
+plot_temp2 = ggplot(data2, aes(x = mean_neighb_f, y = focal_height_f)) + 
+  geom_point()+
+  theme_bw() +
+  theme_basic+
+  labs(x = 'Final mean neighbour height',
+       y = 'Final focal height', title = 'B') 
+# Add histograms
+plot_temp2 = ggExtra::ggMarginal(plot_temp2, type = "histogram")
+
+# Setup plot 3
+plot_temp3 = ggplot(data2, aes(x = change_f, y = change_neighb)) + 
+  geom_point()+
+  theme_bw() +
+  theme_basic+
+  labs(x = 'Focal growth',
+       y = 'Mean neighbour growth', title = 'C')   
+# Add histograms
+plot_temp3 = ggExtra::ggMarginal(plot_temp3, type = "histogram")
+
+ggarrange(plot_temp1, plot_temp2, plot_temp3, ncol = 1, nrow = 3)
+``` 
+
+<br>
+
+**Transform the data.**
+
+```{r}
+data2 = (data2[, 3:20])
+data2 = log(data2 + 1)
+#view(data2)
+```
+
+
+<br>
+
+**Carry out the model specifying the equation of the model you chose.**
+ 
+```{r}
+cor.test(data2$mean_neighb_i, data2$focal_height_f)
+cor.test(data2$mean_neighb_f, data2$focal_height_f)
+cor.test(data2$change_f, data2$change_neighb)
+```
+
+<br>
+
+**Report the necessary test results and discuss your results in a biological context.**
+ 
+>We found no relationship between the mean initial neighbour height and the final hight of the focal tree (Pearson correlation $r = 0.34, t_{22} = 1.69, P = 0.11$). 
+
+>We found no relationship between the mean initial neighbour height and the final hight of the focal tree (Pearson correlation $r = 0.33, t_{22} = 1.65, P = 0.11$). 
+
+>We found no relationship between the mean initial neighbour height and the final hight of the focal tree (Pearson correlation $r = 0.10, t_{22} = 0.48, P = 0.63$). 
+
+>We therefore reject all our working hypotheses.
+
+<br>
+
+**Produce graphs of your results.**
+ 
+```{r, echo = F, fig.height = 12, fig.width = 6, fig.align = 'center', fig.cap= ' A: Plot of mean initial neighbour height against final focal plant height, B: Plot of mean final neighbour height against final focal plant height, C: Plot of focal plant growth against mean neighbour plant growths' }
+plot1 = ggplot(data2, aes(x = mean_neighb_i, y = focal_height_f))+
+  geom_point()+
+  ggtitle('r = 0.34, t(22) = 1.69, P = 0.11')+
+  theme_bw() +
+  theme_basic+
+  labs(x = 'Mean initial neighbour height',
+       y = 'Final focal heigt', title = "A")  
+
+plot2 = ggplot(data2, aes(x = mean_neighb_f, y = focal_height_f))+
+  geom_point()+
+  ggtitle('r = 0.33, t(22) = 1.65, P = 0.11')+
+  theme_bw() +
+  theme_basic+
+  labs(x = 'Mean final neighbour height',
+       y = 'final focal heigth', title = 'B')
+
+plot3 = ggplot(data2, aes(x = change_f, y = change_neighb))+
+  geom_point()+
+  ggtitle('r = 0.10, t(22) = 0.48, P = 0.63')+
+  theme_bw() +
+  theme_basic+
+  labs(x = 'Focal plant growth',
+       y = 'Mean neighbour growth', title = 'C')  
+
+ggarrange(plot1, plot2, plot3, ncol = 1, nrow = 3)
+  
+```
+
+
+<br>
+
+
+### Linear model with continuous response variable
+
+**Perform one regression analysis from the set of options, report why regression was used, phrase a hypothesis and discuss the findings.**
+
+<br>
+
+**Formulate one or more directional hypotheses**
+
+> Being an essential Nutrient for plants, **phosphorous concentration** should have a positive effect on **plant growth rate (difference between first and last measured height**, therefore we propose the following hypthesis.  
+
+> $H_{1}$: Increasing levels of phosphorus increase the growth rate of the focal tree.
+
+> We test this using a regression analysis as it is the appropriate tool to quantify a directional relationship between continiuous variables.
+
+<br>
+
+**Check appropriate model assumptions and if necessary transform data.**
+ 
+> Data is already transformed from previous correlation.
+ 
+```{r, echo = F, fig.height = 4, fig.width = 6, fig.align = 'center', fig.cap = 'Plot of focal plant growth agains phosphorous concentration with histograms of each variable'}
+plot_temp1 = ggplot(data2, aes(x = P, y = change_f)) + 
+  geom_point()+
+  theme_bw() +
+  theme_basic+
+  labs(x = 'Phosphorous concentration',
+       y = 'Focal plant growth') 
+plot_temp1 = ggExtra::ggMarginal( plot_temp1, type = "histogram")
+plot_temp1
+```
+ > Assumption of normal distribution not fulfilled, assumption of equal variance along X more or less fulfilled, not fixed by transformation
+ 
+ <br>
+ 
+**For b and c, Carry out the model specifying the equation of the model you chose**
+
+```{r}
+modelP <- lm(change_f ~ P, data = data2)
+
+summary(modelP)
+Anova(modelP)
+```
+ - Report the necessary test results and discuss your results in a biological context (Max 4 sentences).
+
+> To test whether variation in phosphorous uptake predicts plant growth, we performed a linear regression with growth rate of the focal tree as a function of soil phosphorus concentration. We visually confirmed sufficient approximation of residual normality and variance homogeneity across the investigated range of phosphorous concentrations, a linear relationship, and the absence of influential outliers. The growth rate did not increase significantly with increasing phosphorous concentration (linear regression $R^2 = 0.0012, F_{1,22} = 0.027, p = 0.87$). This might be due to other factors limiting the growth of the focal tree, possibly other nutrients are less available.
+
+ - Produce graphs of your results.
+ 
+```{r, fig.cap= 'Regression plot of the growth rate of the focal plant against the phosphorous concentration ($R^2 = 0.0012, F_{1,22} = 0.027, p = 0.87$), with regression line'}
+ggplot(data2, aes(x = P, y = change_f))+
+  geom_point()+
+  geom_smooth(method = 'lm', se = F, color = 'black')+
+  labs(y = 'Growth rate focal plant')+
+  theme_basic
+
+```
+ 
+c. Linear model with continuous and categorical response variable: follow the steps in the code prompts and inspect the summary of the models with an without interaction.
+
+# How N affects growth rate across sites
+
+Inspect the data:
+
+```{r, fig.cap='Total growth rate against N concentration, color = sites, red =  Gauga, green = Kent, blue = Tuscarawas '}
+data.3 = data %>% 
+  mutate(total_i = (neighb1_height_i + neighb2_height_i + neighb3_height_i +focal_height_i)/4, 
+         total_f = ((neighb1_height_f + neighb2_height_f + neighb3_height_f +focal_height_f)/4),
+           total_rate = total_f-total_i)
+
+
+data.3 %>% 
+  ggplot(aes(x = N, y = total_rate, color = site))+
+  geom_point()+
+  theme_basic
+
+```
+
+
+ **- Formulate one or more directional hypotheses**
+ 
+> Because nitrogen is an essential nutrient for plants, we expect **plant growth rate (mean difference between first and last measured height of plants in the experiment) ** to increase with **nitrogen concentration**, we therefore propose the following hypothesis:
+ 
+> $H_{1a}$: Plant growth rate increases with higher N concentrations
+
+> Because our experimental sites are placed along a North-South gradient, we expect the northermost expermiental **site** to have the lowest **growth rate** and the southermost the highest, this is due to lower temperatures, we therefore propose the following hypothesis:
+ 
+> $H_{1b}$: Geauga has the lowest growth rate, Kent is intermediate, Tuscawary has the highest growth rate
+
+> Because growth is affected by temperature, we expect that the plants in at the warmer testing site are able to use higher nitrogen concentrations more efficiently than northern plants, therefore the **growth rate** should increase more strongly in southern **sites**, we propose the following hypothesis: 
+  
+> $H_{1c}$: Growth rate increases the most for Tuscawary for higher levels of N, The increase in Kent is intermediate, the increase in Geauga is the lowest. 
+
+```{r}
+modelN = lm(total_rate ~ N*site, data = data.3)
+```
+
+ **- Check appropriate model assumptions and if necessary transform data**
+ 
+```{r, echo = F, fig.height = 4, fig.width = 6, fig.align = 'center', fig.cap='Total growth rate against N concentration, color = sites, red =  Gauga, green = Kent, blue = Tuscarawas, histograms of x and y variable along opposite axis'}
+plot_temp1 = ggplot(data.3, aes(x = N, y = total_rate, colour = site)) + 
+  geom_point()+
+  theme_bw() +
+  theme_basic+
+  labs(x = 'Nitrogen concentration',
+       y = 'Total growth rate', colour = "Site") 
+plot_temp1 = ggExtra::ggMarginal(plot_temp1, type = "histogram")
+plot_temp1
+```
+
+> Assumptions of Normal distribution and equal disrtibution of values along X  not fulfilled. Equal variance along X more or less fulfilled, equal variance within groups not fulfilled -> transformations necessary
+
+```{r}
+
+data.3$total_rate.tr <- log(data.3$total_rate+1) 
+data.3$N.tr <- log(data.3$N+1)
+
+```
+
+```{r, echo = F, fig.height = 4, fig.width = 6, fig.align = 'center', fig.cap='Transformed total growth rate against transformed N concentration, color = sites, red =  Gauga, green = Kent, blue = Tuscarawas, histograms of x and y variable along opposite axis'}
+plot_temp1 = ggplot(data.3, aes(x = N.tr, y = total_rate.tr, colour = site)) + 
+  geom_point()+
+  theme_bw() +
+  theme_basic+
+  labs(x = 'Nitrogen concentration',
+       y = 'Total growth rate', colour = "Site") 
+plot_temp1 = ggExtra::ggMarginal(plot_temp1, type = "histogram")
+plot_temp1
+```
+> The data did not significantly improve after transformation, we continue with untransformed data
+
+**- For b and c, Carry out the model specifying the equation of the model you chose (e.g. model_physical <- lm(blood_pressure ~ physical_activity * sugar_intake, data = my_dataset)** 
+
+> with interaction
+
+```{r}
+modelN = lm(total_rate ~ N*site, data = data.3)
+summary(modelN)
+Anova(modelN)
+```
+
+
+```{r}
+
+snk <- SNK.test(modelN, 'site', console = T, main = 'posthoc_SNK')
+
+```
+**- Report the necessary test results and discuss your results in a biological context (Max 4 sentences).**
+ 
+ > The overall growth rate of the plants did not significantly increase with N concentration (ANOVA F_{1,18} = 0.16, p = 0.69), therefore we reject $H_{1a}$, the grwoth is possibly limited by other resources. The growth rate differed significantly beetween the sites (ANOVA F_{1,18} = 5.61, p = 0.013), the SNK post-hoc test revealed, that Geauga had the lowest overall growth rate with 3.27 cm during the test period, all other sites did not differ from each other, therefore we reject $H_{1b}$ as it is only partially fulfilled but it still seems like the north-south gradient of the test-sites might have some effect. The interaction between growth rates was not significant (ANOVA F_{1,18} = 0.21, p = 0.81), therefore we reject $H_{1c}$, the efficiency of nitrogen use therefore did not increase differently with nitrogen availability across testing sites. We noticed, that the standard error of the estimates was extemely high, as well as well as the overall $R^2$ (= 0.29) and F-Statistic (= 2.84) being quite low, therefore this experiment has only limited power and results should be interpreted very carefully.
+
+ - Produce graphs of your results.
+ 
+```{r, echo = F, fig.cap='Total growth rate against N concentration, color = sites, red =  Gauga, green = Kent, blue = Tuscarawas, with regression line'}
+ 
+reg.plot.2 <- ggplot(data.3, aes(x = N, y = total_rate, colour = site))+
+  geom_point()+
+  facet_grid(rows = "site")+
+  geom_smooth(method = 'lm', se = F, color = 'black')+
+  theme_basic+
+  labs(x = 'N', y = 'Growth rate')
+reg.plot.2
+
+
+
+plot_interaction <- data.3 %>%
+ggplot(aes(colour = site, y = total_rate, x = N)) + geom_point() +
+scale_colour_viridis_d( alpha = 0.7) +
+geom_smooth(method = 'lm', se = F, color = 'black')+
+labs(y = "Growth rate",
+x = "N",
+colour = "Site") + theme_basic
+plot_interaction
+```
+
